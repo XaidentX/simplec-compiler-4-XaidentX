@@ -358,45 +358,6 @@ static void codegen_assignstmt(T_stmt stmt) {
   }
 }
 
-/*
-  // Generate code for the right hand side of the assignment.
-  COMMENT("generate code for the right-hand side of the assignment");
-  codegen_expr(stmt->assignstmt.right);
-
-  // Pop it from the stack.
-   POP("%rax");
-
-  // Find the address of the left hand side of the assignment.
-  T_expr left_expr = stmt->assignstmt.left;
-
-  if (left_expr->kind == E_identexpr){
-
-   // POP("%rax");
-
-    // Lookup the identifier to find its offset.
-    int offset = lookup_offset_in_scope(current_offset_scope, left_expr->identexpr);
-
-    // Move the register that holds the right hand side of the expression into the stack address.
-    MOV_TO_OFFSET("%rax", offset);
-
-  } else if (left_expr->kind == E_unaryexpr){
-       
-    // Generate code for the expression inside the dereference operator
-    codegen_expr(left_expr->unaryexpr.expr);
-
-    // Pop the result (address) from the stack into a register
-    //POP("%rbx");
-    POP("%rax");
-
-    // Move the value to be assigned into the memory location pointed by the address
-    //MOV("%rax", "(%rbx)");
-    MOV("%rbx", "(%rax)");
-
-    
-  }
-
-*/
-
 static void codegen_ifstmt(T_stmt stmt) {
 
   // evaluate the condition expression
