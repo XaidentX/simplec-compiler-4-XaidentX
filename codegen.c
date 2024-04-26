@@ -32,6 +32,9 @@ FILE *codegenout;  // the output of code generation
 #define JGE(labelnum) fprintf(codegenout,"\tjge .L%d\n", labelnum)
 #define JMP(labelnum) fprintf(codegenout,"\tjmp .L%d\n", labelnum)
 #define LABEL(labelnum) fprintf(codegenout,".L%d:\n", labelnum)
+#define JNE(labelnum) fprintf(codegenout,"\tjne .L%d\n", labelnum)
+
+static int labelCount = 0;
 
 const string const param_registers[] = { "%rdi", "%rsi", "%rdx", "%rcx", "%r8", "%r9"}; // all const
 
@@ -235,11 +238,65 @@ static void codegen_funclist(T_funclist funclist) {
 }
 
 static void codegen_func(T_func func) {
-  fprintf(stderr, "TODO: codegen_func (remove this message when implemented).");
+//  fprintf(stderr, "TODO: codegen_func (remove this message when implemented).");
+
+  // Create a new scope for the function.
+  current_offset_scope = create_offset_scope(current_offset_scope);
+
+  // Emit the pseudo ops for the functions definition.
+  fprintf(codegenout, ".text\n");
+  fprintf(codegenout, ".globl %s\n", func->ident);
+  fprintf(codegenout, ".type %s, @function\n", func->ident);
+
+  // Emit a label for the function.
+  fprintf(codegenout, "%s:\n", func->ident);
+
+  // Insert the parameter into the offset table.
+  insert_offset(current_offset_scope, func->paramlist->ident, 8);
+
+  // Add local declarations to the scope.
+  codegen_decllist(func->decllist);
+
+  // Emit the function prologue.
+  COMMENT("emit the function prologue");
+  emit_prologue(current_offset_scope->stack_size);
+
+  // Move the one parameter onto the stack.
+  COMMENT("move parameter onto the stack");
+  int offset = lookup_offset_in_scope(current_offset_scope, func->paramlist->ident);
+  MOV_TO_OFFSET("%rdi", offset);
+
+  // Generate code for the body of the function.
+  COMMENT("generate code for the body");
+  codegen_stmtlist(func->stmtlist);
+
+  // Generate code for the return expression.
+  COMMENT("generate code for the return expression");
+  codegen_expr(func->returnexpr);
+
+  COMMENT("save the return expression into %rax per the abi");
+  POP("%rax");
+
+  // Emit the epilogue
+  COMMENT("emit the epilogue");
+  emit_epilogue();
+
+  // Destroy the function's scope
+  current_offset_scope = destroy_offset_scope(current_offset_scope);
 }
 
 static void codegen_decllist(T_decllist decllist) {
-  fprintf(stderr, "TODO: codegen_decllist (remove this message when implemented).");
+//  fprintf(stderr, "TODO: codegen_decllist (remove this message when implemented).");
+
+  // Loop over each element in the decllist list.
+  while(decllist != NULL){
+
+    // Insert each element into the offset_scope.
+    insert_offset(current_offset_scope, decllist->decl->ident, 8);
+
+    decllist = decllist->tail;
+
+}
 }
 
 /* statements */
@@ -266,26 +323,174 @@ static void codegen_stmt(T_stmt stmt) {
 }
 
 static void codegen_assignstmt(T_stmt stmt) {
-  fprintf(stderr, "TODO: codegen_assignstmt (remove this message when implemented).");
+
+  if (stmt->assignstmt.left->kind == E_unaryexpr){
+
+    COMMENT("generate code for the deref on the left side of an expression");
+    codegen_expr(stmt->assignstmt.left->unaryexpr.expr);
+
+    COMMENT("generate code for the right-hand side of the assignment");
+    codegen_expr(stmt->assignstmt.right);
+
+    COMMENT("pop the result of the right-hand side");
+    POP("%rbx");
+
+    COMMENT("pop the result of the left-hand side");
+    POP("%rax");
+
+    COMMENT("move the right-hand side's value into the address pointed to by the left-hand size using memory indirect addressing");
+    MOV("%rbx", "(%rax)");
+
+  } else {
+
+    COMMENT("generate code for the right-hand side of the assignment");
+    codegen_expr(stmt->assignstmt.right);
+
+    COMMENT("pop the result of the right-hand side");
+    POP("%rax");
+
+    COMMENT("Lookup the identifier to find its offset");
+    int offset = lookup_offset_in_scope(current_offset_scope, stmt->assignstmt.left->identexpr);
+
+    COMMENT("Move the register that holds the right hand side of the expression into the stack address");
+    MOV_TO_OFFSET("%rax", offset);
+
+  }
 }
 
+/*
+  // Generate code for the right hand side of the assignment.
+  COMMENT("generate code for the right-hand side of the assignment");
+  codegen_expr(stmt->assignstmt.right);
+
+  // Pop it from the stack.
+   POP("%rax");
+
+  // Find the address of the left hand side of the assignment.
+  T_expr left_expr = stmt->assignstmt.left;
+
+  if (left_expr->kind == E_identexpr){
+
+   // POP("%rax");
+
+    // Lookup the identifier to find its offset.
+    int offset = lookup_offset_in_scope(current_offset_scope, left_expr->identexpr);
+
+    // Move the register that holds the right hand side of the expression into the stack address.
+    MOV_TO_OFFSET("%rax", offset);
+
+  } else if (left_expr->kind == E_unaryexpr){
+       
+    // Generate code for the expression inside the dereference operator
+    codegen_expr(left_expr->unaryexpr.expr);
+
+    // Pop the result (address) from the stack into a register
+    //POP("%rbx");
+    POP("%rax");
+
+    // Move the value to be assigned into the memory location pointed by the address
+    //MOV("%rax", "(%rbx)");
+    MOV("%rbx", "(%rax)");
+
+    
+  }
+
+*/
+
 static void codegen_ifstmt(T_stmt stmt) {
-  // pending project 4
-  fprintf(stderr, "TODO: codegen_ifstmt (project 4)\n");
+
+  // evaluate the condition expression
+  codegen_expr(stmt->ifstmt.cond);
+
+  // store result in %rax
+  POP("%rax");
+
+  // compare the result to false
+  CMP0("%rax");
+
+  // Label for the jump
+  int falseLabel = labelCount++;
+
+  // Jump only if the condition is false.
+  JE(falseLabel);
+
+  // Generate code for the contents of the if branch.
+  codegen_stmt(stmt->ifstmt.body);
+
+  // Label for the end of the if statement
+  LABEL(falseLabel);
+  
 }
 
 static void codegen_ifelsestmt(T_stmt stmt) {
-  // pending project 4
-  fprintf(stderr, "TODO: codegen_ifelsestmt (project 4)\n");
+
+  // evaluate the condition expression.
+  codegen_expr(stmt->ifelsestmt.cond);
+
+  // store result in %rax
+  POP("%rax");
+
+  // compare to "false"
+  CMP0("%rax");
+
+  // label for the else branch
+  int elseLabel = labelCount++;
+
+  // jump only if false to the else branch
+  JE(elseLabel);
+
+  // contents of the if branch
+  codegen_stmt(stmt->ifelsestmt.ifbranch);
+
+  // unconditionally jump past else branch
+  int endLabel = labelCount++;
+  JMP(endLabel);
+
+  // Contents of the else branch
+  LABEL(elseLabel);
+  codegen_stmt(stmt->ifelsestmt.elsebranch);
+
+  // Label for the end of the if-else statement
+  LABEL(endLabel);
+  
+
 }
 
 static void codegen_whilestmt(T_stmt stmt) {
-  // pending project 4
-  fprintf(stderr, "TODO: codegen_whilestmt (project 4)\n");
+  
+    int loopLabel = labelCount++;
+    int exitLabel = labelCount++;
+    
+    // Label for the head of the loop
+    LABEL(loopLabel);
+
+    // evaluate the condition expression
+    codegen_expr(stmt->whilestmt.cond);
+
+    // store result in %rax
+    POP("%rax");
+
+    // compare to "false"
+    CMP0("%rax");
+
+    // jump only if false
+    JE(exitLabel);
+
+    // contents of the while body
+    codegen_stmt(stmt->whilestmt.body);
+
+    // unconditionally jump to loop head
+    JMP(loopLabel);
+
+    LABEL(exitLabel);
+
 }
 
 static void codegen_compoundstmt(T_stmt stmt) {
-  fprintf(stderr, "TODO: codegen_compoundstmt (remove this message when implemented).");
+
+  // Generate the code for the body of the compound statement.
+  codegen_stmtlist(stmt->compoundstmt.stmtlist);
+
 }
 
 /* expressions */
@@ -317,11 +522,26 @@ static void codegen_identexpr(T_expr expr) {
 }
 
 static void codegen_callexpr(T_expr expr) {
-  fprintf(stderr, "TODO: codegen_callexpr (remove this message when implemented).");
+
+  // Generate code for the parameter's expression.
+  codegen_expr(expr->callexpr.args->expr);
+
+  // Pass the parameter to the callee via the %rdi register.
+  POP("%rdi");
+
+  // Emit the call instruction to the function's identifier.
+  CALL(expr->callexpr.ident);
+
+  // Save the return value by pushing it onto the stack.
+  PUSH("%rax");
 }
 
 static void codegen_intexpr(T_expr expr) {
-  fprintf(stderr, "TODO: codegen_intexpr (remove this message when implemented).");
+
+  // Move the immediate value into a register and push it onto the stack.
+  MOV_FROM_IMMEDIATE((int)expr->intexpr, "%rax");
+
+  PUSH("%rax");
 }
 
 static void codegen_charexpr(T_expr expr) {
@@ -339,15 +559,277 @@ static void codegen_arrayexpr(T_expr expr) {
 }
 
 static void codegen_unaryexpr(T_expr expr) {
-  fprintf(stderr, "TODO: codegen_unaryexpr\n");
+
+  // Error handling
+  if (expr == NULL || expr->unaryexpr.expr == NULL) {
+    // Handle the error appropriately, perhaps by printing an error message or returning early
+    fprintf(stderr, "Error: NULL pointer encountered in codegen_unaryexpr\n");
+    return;
+  }
+  
+
+  switch(expr->unaryexpr.op){
+
+    case E_op_ref:
+
+     if (expr->unaryexpr.expr->kind == E_identexpr){
+
+      MOV("%rbp", "%rax"); // Save the base pointer to %rax
+
+      int offset = lookup_offset_in_scope(current_offset_scope, expr->unaryexpr.expr->identexpr);
+
+      SUBCONST(offset, "%rax"); // Subtract the offset from the base pointer
+
+      PUSH("%rax"); // Push the address onto the stack
+
+     }else {
+        fprintf(stderr, "Error: E_op_red: Cannot reference a non-identifier expression\n");  
+    }
+
+    break;
+
+    case E_op_deref:
+    
+    // Generate code for the expression inside the dereference expression
+    codegen_expr(expr->unaryexpr.expr);
+
+    // Retrieve the value from the stack by popping it
+    POP("%rbx");
+
+    // Use memory indirection addressing to move the contents of the memory address to a register
+    MOV("(%rbx)", "%rax");
+
+    // Save the result onto the stack
+    PUSH("%rax");
+    
+    break;
+
+    
+    case E_op_not:
+    
+    // Generate code for the expression inside the not operator
+    codegen_expr(expr->unaryexpr.expr);
+
+    // Retrieve the value from the stack by popping it
+    POP("%rax");
+
+    // Compare with 0
+    CMP0("%rax");
+
+    // jump if false
+    int falseLabel = labelCount++;
+    JE(falseLabel);
+
+    // Move 0 to rax
+    MOV_FROM_IMMEDIATE(0, "%rax");
+
+    // Jump to the label after the one used for JE
+    int endLabel = labelCount++;
+    JMP(endLabel);
+    
+    // Label for JE
+    LABEL(falseLabel);
+
+    // Move 1 to rax
+    MOV_FROM_IMMEDIATE(1, "%rax");  
+
+    // Label for JMP
+    LABEL(endLabel);
+   
+    PUSH("%rax");
+    
+    break;
+  }
+  
+
+
 }
 
 static void codegen_binaryexpr(T_expr expr) {
-  fprintf(stderr, "TODO: codegen_binaryexpr (remove this message when implemented).");
+//  fprintf(stderr, "TODO: codegen_binaryexpr (remove this message when implemented).");
+
+    // Generate code for the left and right operands of the current expression.
+  COMMENT("generate code for the left operand");
+  codegen_expr(expr->binaryexpr.left);
+  COMMENT("generate code for the right operand");
+  codegen_expr(expr->binaryexpr.right);
+
+  // Pop the result of each operand (the right one will be first, since it was pushed last).
+  COMMENT("pop the right operand");
+  POP("%rbx");
+  COMMENT("pop the left operand");
+  POP("%rax");
+
+  // Compute the result of the current expression.
+  switch(expr->binaryexpr.op){
+
+    case E_op_plus:
+      COMMENT("do the addition");
+      ADD("%rbx", "%rax");
+      break;
+
+    case E_op_minus:
+      COMMENT("do the subtraction");
+      SUB("%rbx", "%rax");
+      break;
+
+    case E_op_times:
+      COMMENT("do the multiplication");
+      IMUL("%rbx", "%rax");
+      break;
+
+    case E_op_divide:
+      COMMENT("do the division");
+      CDQ();
+      IDIV("%rbx");
+      // quotient is in %rax
+      break;
+
+    case E_op_mod:
+      COMMENT("do the remainder");
+      CDQ();
+      IDIV("%rbx");
+      // remainder is in %rdx
+      MOV("%rdx", "%rax");
+      break;
+
+    
+    case E_op_and:
+
+      // Test the left operand
+      CMP0("%rax");
+
+      // Jump only if false
+      JE(labelCount);
+
+      // Test right operand
+      CMP0("%rbx");
+
+      // Jump only if false
+      int falseLabel = labelCount++;
+      JE(falseLabel);
+
+      // Set result (%rax) to true
+      MOV_FROM_IMMEDIATE(1, "%rax");
+
+      // Jump to end label
+      int endLabel = labelCount++;
+      JMP(endLabel);
+
+      // Label for false result
+      LABEL(falseLabel);
+
+      // Set result (%rax) to false
+      MOV_FROM_IMMEDIATE(0, "%rax");
+
+      // Label for end of expression
+      LABEL(endLabel);
+
+      break;
+      
+    case E_op_or:
+
+      // Test the left operand
+      CMP0("%rax");
+
+      // jump only if NOT false
+      int trueLabel = labelCount++;
+      JNE(trueLabel);
+
+      // test right operand
+      CMP0("%rbx");
+
+      // jump only if NOT false
+      JNE(trueLabel);
+
+      // set result (%rax) to false
+      MOV_FROM_IMMEDIATE(0, "%rax");
+
+      // jump
+      endLabel = labelCount++;
+      JMP(endLabel);
+
+      // true label
+      LABEL(trueLabel);
+
+      // set result (%rax) to true
+      MOV_FROM_IMMEDIATE(1, "%rax");
+
+      // first instruction after the "or" operation
+      LABEL(endLabel);
+
+      break;
+
+    case E_op_eq:
+
+      // Compare the two operands
+      CMP("%rax", "%rbx"); 
+      
+      // Jump to labelCount if operands are equal
+      trueLabel = labelCount++;
+      JE(trueLabel);
+
+      // Move 0 to %rax (not equal case)
+      MOV_FROM_IMMEDIATE(0, "%rax");
+
+      // Jump to end label
+      endLabel = labelCount++;
+      JMP(endLabel);
+
+      // Label for equal case
+      LABEL(trueLabel);
+
+      // Move 1 to %rax (equal case)
+      MOV_FROM_IMMEDIATE(1, "%rax");
+
+      // End label
+      LABEL(endLabel);
+
+      break;
+
+    case E_op_lt:
+    
+      // Compare the two operands
+      CMP("%rbx", "%rax");
+
+      // Jump if the left operand is greater than the right operand
+      int greaterThan = labelCount++;
+      JGE(greaterThan);   
+
+      // Set result to 1 (true) for left less than right
+      MOV_FROM_IMMEDIATE(1, "%rax");  
+
+      // Unconditionally jump to skip setting the result to 0 (false)
+      endLabel = labelCount++;
+      JMP(endLabel);
+
+      // Label for when the left operand is greater than the right operand
+      LABEL(greaterThan);
+
+      // Set result to 0 (false) for left greater than right
+      MOV_FROM_IMMEDIATE(0, "%rax");  
+
+      // End label
+      LABEL(endLabel);
+      
+      break;
+      
+
+    default:
+      fprintf(stderr, "ERROR: Unsupported binary operation.\n");
+      exit(1);
+
+   
+  }
+
+  // Push the result onto the stack.
+  COMMENT("push the expression result");
+  PUSH("%rax");
 }
 
 static void codegen_castexpr(T_expr expr) {
   // bonus: truncate or extend data between bitwidths depending on type  
+  codegen_expr(expr->castexpr.expr);
 }
 
 /**
